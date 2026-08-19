@@ -7,7 +7,7 @@ enforces physics, and it adds up money.
 ## Getting started
 
 **1. Make your own copy.** Click **Use this template** on the repository page.
-Do *not* fork it — a fork shares its object store with every other fork, so
+Do *not* fork it. a fork shares its object store with every other fork, so
 forking makes your work reachable by other candidates. Use the template, and you
 get a fresh private repository of your own.
 
@@ -19,8 +19,6 @@ your work is found:
 dispatch/submissions/CH25B039/policy.py      # if your roll number is CH25B039
 ```
 
-A directory under any other name is not collected, and a submission that is not
-collected cannot be scored. 
 
 **3. Set up the environment.**
 
@@ -40,7 +38,7 @@ required:
 
 - **Fill in the Google form shared with you**, giving your repository link and
   your roll number.
-- **Upload a short write-up as a PDF** on the same form. See below.
+- **Upload a write-up of what you have built as a PDF** on the same form. See below.
 - **Add `42Nachos` as a collaborator** on your repository:
   *Settings -> Collaborators -> Add people*.
 
@@ -64,8 +62,8 @@ What we are looking for:
 
 Write it for an engineer who will read your code straight afterwards. If you
 attempted more than one track, cover each. **Track 2 in particular is judged on
-your reasoning as much as on the model** — how you justify collapsing your
-physics into the 15-minute port is the deliverable, and this is where you say it.
+your reasoning as much as on the model** - how you justify collapsing your
+physics into the 15-minute port.
 
 ## The four tracks
 
