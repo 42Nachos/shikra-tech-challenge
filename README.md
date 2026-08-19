@@ -19,6 +19,8 @@ your work is found:
 dispatch/submissions/CH25B039/policy.py      # if your roll number is CH25B039
 ```
 
+A directory under any other name is not collected, and a submission that is not
+collected cannot be scored.
 
 **3. Set up the environment.**
 
