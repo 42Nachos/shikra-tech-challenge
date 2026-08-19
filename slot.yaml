@@ -1,0 +1,7 @@
+# Track 2 only. Delete this file if you are not submitting a model.
+#
+# `model` is your module under sim/assets/<family>_models/, WITHOUT the .py.
+# Rename it to your roll number when you rename the module.
+family: bess          # bess | pv
+model: EXAMPLE        # -> sim/assets/bess_models/EXAMPLE.py
+spec_class: FlatSpec  # the spec class inside that module

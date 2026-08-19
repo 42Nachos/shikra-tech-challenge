@@ -1,0 +1,68 @@
+# Dependencies are managed by conda in environment.yml, NOT here.
+# This file now only carries configuration for ruff, mypy, and pytest, which read
+# pyproject.toml regardless of how the environment was built.
+[project]
+name = "ems-testbed"
+version = "0.0.1"
+description = "15-minute simulation testbed for an industrial microgrid EMS dispatcher"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+# THE RULE SET IS DECLARED, not inherited. Without this, ruff enforces whatever
+# the installed version calls default -- which is a moving target, and moved a
+# long way: a `conda env update` that pulled ruff 0.16 turned on seven rule
+# families nobody had opted into (TRY, I, RUF, ISC, PLW...) and reported 30
+# findings in untouched files. The lint surface of this repo is not allowed to
+# depend on when someone last rebuilt their environment.
+#
+# These four are exactly what ruff 0.5's default was, so declaring them changed
+# nothing at the time of writing. Adopting a new rule is now a deliberate line
+# here, reviewed like any other change, rather than a side effect of an upgrade.
+[tool.ruff.lint]
+select = [
+    "E4", # imports: placement and one-per-line
+    "E7", # statement-level mistakes: `== None`, bare except, ambiguous names
+    "E9", # syntax and IO errors
+    "F",  # pyflakes: undefined names, unused imports, bad format strings
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = [
+    "contracts.py",
+    "runner.py",
+    "sim",
+    "dispatch",
+    "config",
+    "tools",
+    "tests",
+]
+
+# highspy ships py.typed, so its types ARE checked -- but parts of its public
+# surface (the `Highs` constructor among them) carry no annotations, and
+# --strict rejects calling an untyped function. This exempts calls INTO highspy
+# from that one rule and nothing else: deliberately not `ignore_missing_imports`,
+# which would throw away the type information the package does provide, and not
+# a module-wide relaxation of the oracle, where a call into any OTHER untyped
+# library must still be an error.
+untyped_calls_exclude = ["highspy"]
+
+[[tool.mypy.overrides]]
+module = "pvlib.*"
+ignore_missing_imports = true
+
+
+# pandas ships no stubs in this environment (they are a separate `pandas-stubs`
+# package). It is used in exactly one place -- synth/sources.py, to hand pvlib
+# the DatetimeIndex its clear-sky model wants -- and every value crossing back
+# out of it is converted to a float there, so nothing untyped escapes.
+[[tool.mypy.overrides]]
+module = "pandas.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

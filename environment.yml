@@ -1,0 +1,117 @@
+# Conda environment for the EMS testbed.
+# Create it:   conda env create -f environment.yml
+# Update it:   conda env update -f environment.yml --prune
+# This file (committed to git) is what makes the environment reproducible across
+# machines — your Linux box and your teammate's Mac get the same declared setup.
+name: ems-testbed
+channels:
+  - conda-forge          # free, community channel — no Anaconda licensing concerns
+dependencies:
+  - python=3.12          # pinned one behind latest for stability (was .python-version)
+  # runtime
+  # NOT pinned, and it is the same class of risk as numpy above: pandas is used
+  # in one place (synth/sources.py, to hand pvlib a DatetimeIndex) and every
+  # value crossing back out is converted to a float there, so it does not carry
+  # the repo's arithmetic. Pin it the day that stops being true.
+  - pandas>=2.2
+  # PINNED EXACTLY, alongside pvlib and scipy below and for the same reason:
+  # every golden in this repo is numpy arithmetic, so `numpy>=1.26` meant a
+  # fresh `conda env create` could move a number nobody changed.
+  #
+  # Found by building the scoring container, which solved 2.5.2 where this
+  # machine had 2.4.6. The visible symptom was `mypy --strict` reporting
+  # "Tuple index out of range" at fitting/report.py:157 -- 2.5's stubs narrowed
+  # `ndarray.shape` -- and the invisible one is that two machines were doing the
+  # repo's float arithmetic with different releases.
+  #
+  # Moving this pin is a commit that reads the golden diff. numpy 2.5 also wants
+  # fitting/report.py:157 rewritten; settle that with the bump, not before.
+  - numpy=2.4.6
+  - pydantic>=2.7
+  - pyyaml>=6.0
+  - pyarrow>=16.0
+  # The PV DC models: PVWatts, De Soto and CEC (ADR-0003 D5, ADR-0011 D1).
+  #
+  # PINNED EXACTLY, alongside scipy below, and ADR-0011 D6 is why. The
+  # single-diode models solve through `singlediode(method="lambertw")`, chosen
+  # over `newton` and `brentq` precisely so a result does not depend on scipy's
+  # root-find tolerances -- a version bump there could move the last bits of a
+  # number and break golden files for reasons that have nothing to do with this
+  # repository. That pin buys nothing if the library evaluating it can move
+  # underneath, so both are held together.
+  #
+  # This is the ruff discipline, not the highspy one: an upgrade is a deliberate
+  # commit that reads the golden diff, not a version bump.
+  - pvlib-python=0.15.2
+  - plotly>=5.22         # tools/report.py only; never imported by sim/ or dispatch/
+  # tools/plot_csv.py only -- a native window for eyeballing a CSV, where plotly
+  # would give an HTML page. Never imported by sim/ or dispatch/. `-base` is the
+  # package without the Qt stack: the Tk backend is already in the environment.
+  - matplotlib-base>=3.8
+  # tools/local/scrape_rooftop_xlsx.py only -- reading the Victron VRM .xlsx
+  # exports. Never imported by sim/ or dispatch/. That script is GITIGNORED, so
+  # a fresh clone installs this for a file it does not have; kept anyway,
+  # because the alternative is every machine rediscovering the dependency the
+  # first time it is handed a workbook.
+  - openpyxl>=3.1
+  # The ADR-0008 oracle's LP/MILP solver, and since ADR-0013 the MPC's as well.
+  # sim/ must never import it.
+  #
+  # RESCOPED, NOT RELAXED. This block used to read "metrics/ only ... a
+  # dispatcher that could solve against the true models would not be under test
+  # any more", and that sentence is about the MODELS, not about the solver. What
+  # keeps `dispatch/` under test is that it cannot reach them: `tools/
+  # check_boundary.py` forbids `dispatch/ -> sim/` and, since ADR-0013,
+  # `dispatch/ -> metrics/` as well -- the second of which was missing while the
+  # ban here was doing the work. The MPC optimises `FleetView.believed`, which is
+  # deliberately wrong, against `dispatch/cost.py`, which is an independent
+  # implementation of the tariff. Both of its inputs are still degraded; only
+  # the arithmetic got better.
+  #
+  # NOT pinned to a patch version, unlike ruff. Nothing here is byte-reproducible
+  # across solver versions -- two distinct optima can tie on cost -- which is
+  # exactly why the oracle is not a golden case. What is frozen is the RELATION
+  # (oracle <= every policy, planned == realized), and that holds whatever
+  # HiGHS returns.
+  - highspy>=1.7
+  # The fitting library's optimisers (ADR-0010). `fitting/` only -- sim/ and
+  # dispatch/ must never import it, for the same reason they must never import
+  # highspy above: a fitted plant model is truth-side analysis, and a dispatcher
+  # that could search against the true models would not be under test.
+  #
+  # DECLARED even though pvlib already pulls scipy in. A transitive dependency is
+  # one somebody else's requirements file may drop, and "it happens to be there"
+  # is not a dependency declaration.
+  #
+  # PINNED EXACTLY since ADR-0011 D6 -- see pvlib-python above, which it is held
+  # equal to deliberately. Note this differs from highspy's reasoning two blocks
+  # up: there, nothing is byte-reproducible across solver versions and only the
+  # RELATION is frozen. Here the numbers themselves are in the goldens.
+  - scipy=1.18.0
+  # dev tooling
+  - pytest>=8.0
+  - hypothesis>=6.100
+  # PINNED, for the same reason ruff is. The scoring container solved 2.3.1
+  # where this machine had 2.3.0, and a type checker that differs between the
+  # machine a submission is written on and the machine it is graded on reports
+  # different errors on identical code. Upgrading is a deliberate commit that
+  # reads the new findings, not a version bump.
+  - mypy=2.3.0
+  # Pinned to the `rev:` in .pre-commit-config.yaml. Keep them equal.
+  #
+  # The LINT surface no longer depends on this: pyproject.toml declares the rule
+  # set explicitly, and ruff 0.16 was verified to report the same clean result
+  # against it as 0.5 does. What the pin still governs is the FORMATTER, which
+  # `select` cannot control -- 0.16's formatter would rewrite four modules under
+  # sim/ and tests/, and the code blocks inside HANDBOOK.md and three ADRs.
+  # Upgrading is therefore a deliberate reformat commit, not a version bump.
+  - ruff=0.5.0
+  - pre-commit>=3.7
+  - types-pyyaml>=6.0
+  - types-openpyxl>=3.1   # stubs, so tools/local/ type-checks strict where it exists
+  # Real stubs rather than an `ignore_missing_imports` override for scipy.*.
+  # The overrides in pyproject.toml exist because pvlib and pandas ship no types
+  # in this environment; scipy has some, and throwing them away to save one line
+  # would mean `least_squares(...)` type-checks as returning Any inside the one
+  # package whose whole job is numerical.
+  - scipy-stubs>=1.16

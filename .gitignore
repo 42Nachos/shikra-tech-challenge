@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# `runner.py` writes a directory per run. They are outputs, not work.
+runs/
+
+# Your fitted numbers, plots and scratch files. Commit the code, not the noise.
+*.parquet
+!studies/**/*.csv
+
+.vscode/
+.idea/
+.DS_Store

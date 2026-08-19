@@ -1,0 +1,221 @@
+# The practice site.
+#
+# This is the plant your dispatcher runs against on the public scenario. Every
+# number here is what the equipment IS: the simulator enforces these limits,
+# clips commands that exceed them, and records the violation.
+#
+# THREE THINGS TO READ BEFORE YOU START.
+#
+# `spec:` is the truth and `believed:` is not. Each fleet member carries both.
+# Your dispatcher never sees `spec:` -- it receives `believed:` through
+# `FleetView.believed`, and those numbers are allowed to be WRONG. That gap is
+# deliberate: a real EMS works from a plant model that has drifted from the
+# plant, and how well a policy copes with being wrong is part of what is being
+# measured. Do not assume the two agree.
+#
+# `noise:` is what the INSTRUMENTS do, as against what the equipment is and what
+# you believe. Your dispatcher never sees this block either; it sees the readings
+# that come out the other side of it. Nothing is clamped, so an estimate may read
+# below zero or above a rating.
+#
+# The plant you are SCORED on is not this one. It has the same members, the same
+# ids and the same tariff, and different equipment values. A policy that hard-codes
+# the numbers below is fitting the wrong machine.
+site: hack_public
+dt_minutes: 15
+
+# How often the dispatcher DECIDES, in plant steps. 1 = every interval.
+dispatch_interval_multiple: 1
+
+# Which asset's real power closes the energy balance, best first. The plant takes
+# the first entry that is available this interval and not commanded off, so a grid
+# outage hands the bus to the battery, and a battery that is also gone hands it to
+# the genset. This happens in hardware; your dispatcher does not choose it, though
+# it can derive it with `FleetView.slack_id(available)`.
+slack_priority: [grid_1, bess_1, dg_1]
+
+fleet:
+  # ORDERED. Iteration order fixes the order of the CostBreakdown's lines, and
+  # floating-point addition is not associative, so this is behaviour rather than
+  # presentation.
+  assets:
+    - id: pv_1
+      type: pv
+      cost_terms: []
+      believed:
+        performance_ratio: 0.97
+        bifacial_gain_fraction: 0.06
+      # ASSUMED, an accuracy class on a rating rather than a characterised
+      # instrument, scaled from site_a at the same percentage of full scale.
+      noise:
+        p_meter_sigma_kw: 6.0
+        q_meter_sigma_kvar: 4.4
+      spec:
+        # Curtailment is a P setpoint below what is available, not a separate
+        # channel. Command the array's rating to leave it alone.
+        model: pvwatts
+        params:
+          pvwatts:
+            p_dc0_kw: 600.0
+            gamma_pdc: -0.0030        # -0.30 %/degC
+            low_light_k: 0.027960     # efficiency rolloff at low irradiance
+            low_light_g_ref_w_m2: 1000.0
+            noct_c: 43.0              # cell temp = T_air + (NOCT-20)*G/800
+            bifacial_gain_pct: 0.08
+            soiling: 1.0              # NOT MODELLED. One is not a claim that the
+                                      # array never soils, only that nothing here
+                                      # decays it.
+            system_derate: 0.96
+            inverter_eff: 0.975
+            p_ac_max_kw: 500.0
+            s_max_kva: 550.0          # some reactive headroom at full output
+
+    - id: dg_1
+      type: genset
+      cost_terms:
+        - kind: fuel
+          params:
+            price_inr_per_litre: 90
+      believed:
+        fuel_curve: {a: 9.360000, b: 0.263467, c: -0.0000395062}
+        min_stable_load_fraction: 0.30
+      noise:
+        p_meter_sigma_kw: 4.6
+        q_meter_sigma_kvar: 4.6
+      spec:
+        # MINIMUM STABLE LOAD IS A FORBIDDEN BAND, NOT A FLOOR TO CLIP TO. A set
+        # commanded between zero and p_min_stable_kw idles: it delivers NOTHING
+        # and burns idle_fuel_lph. Commanding 100 kW from this machine gets you
+        # 0 kW and a fuel bill. Either commit it at or above 135 kW, or leave it
+        # off. Your dispatcher sees this only through
+        # `believed.min_stable_load_fraction` -- a box rating cannot express a
+        # hole in the middle of a range, so `AssetRatings.p_min_kw` is 0.0.
+        model: fuel_curve
+        params:
+          fuel_curve:
+            p_rated_kw: 450.0
+            p_min_stable_kw: 135.0
+            fuel_curve: {a: 9.000000, b: 0.253333, c: -0.0000395062}   # L/h, concave
+            fuel_curve_domain_kw: [112.5, 450.0]   # never extrapolated outside this
+            idle_fuel_lph: 11.5           # breaker closed, output zero
+            max_avg_load_factor_24h: 0.70
+            start_cost_inr: 25            # declared, not yet charged by the ledger
+
+    - id: bess_1
+      type: bess
+      cost_terms:
+        - kind: degradation
+          params:
+            # Throughput counts BOTH legs, so one full cycle of the 1,800 kWh
+            # usable band is 3,600 kWh charged at this rate. Against a ToU spread
+            # of 7.125 to 9.375 INR/kWh this is above the break-even for buying
+            # low and selling high -- moving energy on price alone loses money
+            # here. The battery earns its keep on the demand charge and on
+            # outages.
+            inr_per_kwh_throughput: 1.40
+      believed:
+        usable_capacity_kwh: 1700.0
+        round_trip_efficiency: 0.92
+      carry_in:
+        soc_kwh: 1000.0
+      noise:
+        p_meter_sigma_kw: 5.0
+        q_meter_sigma_kvar: 4.4
+        # SOC is not measured but ESTIMATED by the BMS, and it drifts.
+        soc_sigma_kwh: 60.0
+      spec:
+        model: tank
+        params:
+          tank:
+            energy_nom_kwh: 2000
+            p_max_charge_kw: 500
+            p_max_discharge_kw: 500
+            eta_charge: 0.9746794         # one-way; the pair multiplies to 0.95
+            eta_discharge: 0.9746794
+            soc_min_kwh: 200
+            soc_max_kwh: 2000
+            s_max_kva: 550
+
+    - id: grid_1
+      type: grid
+      # The grid is just an asset, and its cost data is the whole tariff. TNERC
+      # Suo-motu T.O. No. 6 of 2025, HT-I "Industries, Factories, IT services".
+      #
+      # THREE OF THESE FOUR TERMS ARE NOT SELF-SUFFICIENT: exports are credited at
+      # the applicable import rate, and the PF penalty is a percentage of the
+      # period's consumption charges. So the ToU schedule is declared ONCE, on
+      # `energy`, and the other two read it.
+      cost_terms:
+        - kind: energy
+          params:
+            base_rate_inr_per_kwh: 7.50
+            # Peak +25%, night -5%, normal 1.0. These partition the full 24h in
+            # local (Asia/Kolkata) clock time, to the minute.
+            tou_windows:
+              - {label: night_early,    start: "00:00", end: "05:00", multiplier: 0.95}
+              - {label: morning_normal, start: "05:00", end: "06:00", multiplier: 1.00}
+              - {label: morning_peak,   start: "06:00", end: "10:00", multiplier: 1.25}
+              - {label: day_normal,     start: "10:00", end: "18:00", multiplier: 1.00}
+              - {label: evening_peak,   start: "18:00", end: "22:00", multiplier: 1.25}
+              - {label: night_late,     start: "22:00", end: "24:00", multiplier: 0.95}
+        - kind: export
+          params:
+            credit_at_import_rate: true
+        - kind: demand_charge
+          params:
+            # THE LARGEST SINGLE LINE ON THIS BILL, and the one most worth your
+            # attention. It charges the highest BLOCK-INTEGRATED import kVA
+            # recorded in the billing month -- one block sets it -- floored at 90%
+            # of contracted demand. Shaving the monthly peak below 495 kVA earns
+            # nothing; every kVA above that is worth 608 rupees, once.
+            inr_per_kva_month: 608.0
+            contracted_demand_kva: 550
+            billable_demand_floor_pct: 0.90
+            assumed_power_factor: 1.00  # this dataset has no reactive data
+            demand_window_minutes: 15
+        - kind: pf_penalty
+          params:
+            min_power_factor: 0.90
+            assumed_power_factor: 1.00  # meets the limit, so this term is inert
+            pf_step: 0.01               # clause 3.1.1.6 quantum; shortfall rounds UP
+            bands:
+              - {pf_low: 0.85, pf_high: 0.90, pct_of_charges_per_step: 1.0}
+              - {pf_low: 0.75, pf_high: 0.85, pct_of_charges_per_step: 1.5}
+              - {pf_low: 0.00, pf_high: 0.75, pct_of_charges_per_step: 2.0}
+      # Nothing to estimate, said out loud rather than omitted. The transformer
+      # rating is stamped on the transformer and the tariff is declared above,
+      # where your dispatcher can already read it verbatim.
+      believed: {}
+      noise:
+        p_meter_sigma_kw: 1.4
+        q_meter_sigma_kvar: 1.4
+      spec:
+        model: tnerc_ht
+        params:
+          tnerc_ht:
+            # What CAN flow, as opposed to contracted demand above, which prices
+            # what does. A site may well have a transformer larger than its
+            # contract.
+            transformer_s_max_kva: 1000
+
+  loads:
+    # One load. `LoadCommand` is a CONTACTOR, not a dial: you serve all of it or
+    # none of it. priority 0 = most critical = shed last; with a single load the
+    # ordering does nothing yet.
+    #
+    # Shedding is priced, and BOTH ways of losing load pay the same rate: energy
+    # you deliberately drop and energy the plant could not supply. At 50 INR/kWh
+    # that is more than twice what diesel costs to burn, so running the genset
+    # through an outage is cheaper than dropping the factory.
+    - id: load_1
+      type: fixed
+      priority: 0
+      believed: {}
+      noise:
+        served_p_sigma_kw: 5.0
+        served_q_sigma_kvar: 3.0
+        unserved_p_sigma_kw: 8.0
+      cost_terms:
+        - kind: unserved
+          params:
+            shed_cost_inr_per_kwh: 50
